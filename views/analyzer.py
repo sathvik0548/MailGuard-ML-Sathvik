@@ -51,30 +51,44 @@ def _run(raw: str | bytes | None, source: str) -> None:
         st.session_state.last_error = ("error", f"Analysis failed unexpectedly (request id `{exc.request_id}`). It has been logged.")
 
 
-input_col, settings_col = st.columns([3, 1], gap="large")
+with st.container(border=True):
+    st.subheader("Decision threshold", icon=":material/tune:")
+    threshold_col, reset_col = st.columns([3, 1], vertical_alignment="bottom")
+    with threshold_col:
+        st.slider(
+            "Spam if probability ≥", min_value=0.0, max_value=1.0, step=0.01, key="threshold",
+            help="Lower = catch more spam but risk more false positives. Moving the slider re-labels the current "
+            "result instantly without sending a new request.",
+        )
+    with reset_col:
+        st.button(
+            f"Reset to tuned value ({model.threshold:.2f})",
+            on_click=_reset_threshold,
+            width="stretch",
+        )
+    st.caption("Tuned for precision-weighted F0.5 on the validation split.")
 
-with settings_col:
-    st.subheader("Decision threshold")
-    st.slider(
-        "Spam if probability ≥", min_value=0.0, max_value=1.0, step=0.01, key="threshold",
-        help="Lower = catch more spam but risk more false positives. Moving the slider re-labels the current "
-        "result instantly without sending a new request.",
+with st.container(border=True):
+    st.subheader("Analyze an email", icon=":material/mail:")
+    tab_paste, tab_upload, tab_sample = st.tabs(
+        [":material/content_paste: Paste", ":material/upload_file: Upload .eml", ":material/science: Samples"]
     )
-    st.button(f"Reset to tuned value ({model.threshold:.2f})", on_click=_reset_threshold, width="stretch")
-    st.caption(f"The tuned threshold maximizes F0.5 on the validation split (precision-weighted).")
-
-with input_col:
-    tab_paste, tab_upload, tab_sample = st.tabs([":material/content_paste: Paste", ":material/upload_file: Upload .eml", ":material/science: Samples"])
     with tab_paste:
         pasted = st.text_area(
             "Raw email source or body text", height=240, max_chars=config.MAX_EMAIL_BYTES,
             placeholder="From: sender@example.com\nTo: you@example.com\nSubject: Hello\n\nMessage body...",
         )
-        if st.button("Analyze pasted email", type="primary", icon=":material/search:"):
+        if st.button("Analyze pasted email", type="primary", icon=":material/search:", width="stretch"):
             _run(pasted, "paste")
     with tab_upload:
         uploaded = st.file_uploader("Upload an email file", type=["eml", "txt"], accept_multiple_files=False)
-        if st.button("Analyze uploaded file", type="primary", icon=":material/search:", disabled=uploaded is None):
+        if st.button(
+            "Analyze uploaded file",
+            type="primary",
+            icon=":material/search:",
+            disabled=uploaded is None,
+            width="stretch",
+        ):
             try:
                 validate_upload_filename(uploaded.name if uploaded else None)
                 _run(uploaded.getvalue() if uploaded else None, "upload")
@@ -86,7 +100,13 @@ with input_col:
         if choice:
             with st.expander("Preview sample source"):
                 st.code((config.SAMPLES_DIR / choice).read_text(encoding="utf-8", errors="replace"), language=None)
-        if st.button("Analyze sample", type="primary", icon=":material/search:", disabled=not choice):
+        if st.button(
+            "Analyze sample",
+            type="primary",
+            icon=":material/search:",
+            disabled=not choice,
+            width="stretch",
+        ):
             _run((config.SAMPLES_DIR / choice).read_bytes(), "sample")
 
 err = st.session_state.get("last_error")
@@ -98,21 +118,33 @@ if result is None:
     st.info("Analyze an email to see the prediction, extracted features and explanation.", icon=":material/info:")
     st.stop()
 
-st.divider()
+st.subheader("Analysis results", icon=":material/analytics:")
 threshold = float(st.session_state.threshold)
 label = result.label_at(threshold)
 is_spam = label == "spam"
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Verdict", "SPAM" if is_spam else "HAM", help="HAM = legitimate email")
-c2.metric("Spam probability", f"{result.spam_probability:.1%}")
-c3.metric("Threshold", f"{threshold:.2f}")
-c4.metric("Latency", f"{result.latency_ms:.1f} ms")
+c1.metric(
+    "Verdict",
+    "SPAM" if is_spam else "HAM",
+    help="HAM = legitimate email",
+    border=True,
+    height="stretch",
+)
+c2.metric("Spam probability", f"{result.spam_probability:.1%}", border=True, height="stretch")
+c3.metric("Threshold", f"{threshold:.2f}", border=True, height="stretch")
+c4.metric("Latency", f"{result.latency_ms:.1f} ms", border=True, height="stretch")
 if is_spam:
     st.error(f"Classified as **spam** (probability {result.spam_probability:.3f} ≥ {threshold:.2f}).", icon=":material/report:")
 else:
     st.success(f"Classified as **ham** (probability {result.spam_probability:.3f} < {threshold:.2f}).", icon=":material/verified:")
-st.plotly_chart(probability_bar(result.spam_probability, threshold, dark), width="stretch", config={"displayModeBar": False})
+with st.container(border=True):
+    st.markdown("**Spam probability against the selected threshold**")
+    st.plotly_chart(
+        probability_bar(result.spam_probability, threshold, dark),
+        width="stretch",
+        config={"displayModeBar": False},
+    )
 st.caption(
     f"Request `{result.request_id}` · {result.model_name} v{result.model_version}"
     + (f" · analysed at threshold {result.threshold:.2f}; re-labelled locally at {threshold:.2f}" if abs(result.threshold - threshold) > 1e-9 else "")
